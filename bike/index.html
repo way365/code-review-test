@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>自行车展示</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>自行车展示</h1>
+            <nav>
+                <ul>
+                    <li><a href="#types">自行车类型</a></li>
+                    <li><a href="#parts">自行车部件</a></li>
+                    <li><a href="#maintenance">维护保养</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <section class="hero">
+            <div class="container">
+                <h2>探索骑行的乐趣</h2>
+                <p>无论是城市通勤、山地探险还是公路竞速，总有一款自行车适合你。</p>
+                <div class="bike-svg-container">
+                    <!-- 自行车SVG将通过JavaScript动态加载 -->
+                </div>
+            </div>
+        </section>
+
+        <section id="types" class="types-section">
+            <div class="container">
+                <h2>自行车类型</h2>
+                <div class="bike-types">
+                    <div class="bike-type-card" data-type="road">
+                        <h3>公路自行车</h3>
+                        <p>专为速度设计，适合在平坦的道路上骑行。</p>
+                    </div>
+                    <div class="bike-type-card" data-type="mountain">
+                        <h3>山地自行车</h3>
+                        <p>适合越野和复杂地形，具有良好的减震系统。</p>
+                    </div>
+                    <div class="bike-type-card" data-type="city">
+                        <h3>城市自行车</h3>
+                        <p>适合城市通勤，舒适且易于操控。</p>
+                    </div>
+                    <div class="bike-type-card" data-type="electric">
+                        <h3>电动自行车</h3>
+                        <p>配备电机辅助，适合长距离通勤或爬坡。</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="parts" class="parts-section">
+            <div class="container">
+                <h2>自行车部件</h2>
+                <div class="parts-container">
+                    <div class="part-item" data-part="frame">
+                        <h3>车架</h3>
+                        <p>自行车的骨架，支撑整个车身。</p>
+                    </div>
+                    <div class="part-item" data-part="wheels">
+                        <h3>车轮</h3>
+                        <p>由轮胎、辐条和轮毂组成，决定骑行的舒适度和速度。</p>
+                    </div>
+                    <div class="part-item" data-part="brakes">
+                        <h3>刹车</h3>
+                        <p>控制自行车的停止，确保骑行安全。</p>
+                    </div>
+                    <div class="part-item" data-part="gears">
+                        <h3>变速器</h3>
+                        <p>通过改变齿轮比，适应不同的骑行条件。</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="maintenance" class="maintenance-section">
+            <div class="container">
+                <h2>维护保养</h2>
+                <div class="maintenance-tips">
+                    <div class="tip-item">
+                        <h3>定期检查轮胎压力</h3>
+                        <p>保持适当的轮胎压力可以提高骑行效率和安全性。</p>
+                    </div>
+                    <div class="tip-item">
+                        <h3>润滑链条</h3>
+                        <p>定期润滑链条可以减少磨损，延长使用寿命。</p>
+                    </div>
+                    <div class="tip-item">
+                        <h3>检查刹车系统</h3>
+                        <p>确保刹车灵敏有效，及时更换磨损的刹车片。</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2023 自行车展示网站</p>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
