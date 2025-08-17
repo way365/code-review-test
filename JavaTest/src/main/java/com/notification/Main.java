@@ -38,7 +38,16 @@ public class Main {
             System.err.println("捕获到异常: " + e.getMessage());
         }
         
-        // 示例3：自定义通知
+        // 示例3：微信公众号单独使用
+        System.out.println("\n=== 微信公众号通知示例 ===");
+        if (notificationManager.getService("wechat") != null) {
+            notificationManager.getService("wechat")
+                .sendTaskCompletionNotification("微信公众号测试", "成功", 1500);
+        } else {
+            System.out.println("微信公众号未配置，跳过示例");
+        }
+        
+        // 示例4：自定义通知
         notificationManager.sendToAll("这是一个自定义测试消息", "测试通知");
         
         System.out.println("所有示例任务执行完成！");
