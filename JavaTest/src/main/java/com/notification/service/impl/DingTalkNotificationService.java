@@ -2,12 +2,13 @@ package com.notification.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.notification.service.NotificationService;
-import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.hc.client5.http.classic.methods.CloseableHttpResponse;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
+import java.nio.charset.StandardCharsets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -81,12 +82,14 @@ public class DingTalkNotificationService implements NotificationService {
             httpPost.setEntity(entity);
             
             try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
-                int statusCode = response.getStatusLine().getStatusCode();
+                int statusCode = response.getCode();
+                String responseBody = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+                
                 if (statusCode == 200) {
-                    logger.info("钉钉消息发送成功");
+                    logger.info("钉钉消息发送成功: {}", responseBody);
                     return true;
                 } else {
-                    logger.error("钉钉消息发送失败，状态码: {}", statusCode);
+                    logger.error("钉钉消息发送失败，状态码: {}, 响应: {}", statusCode, responseBody);
                     return false;
                 }
             }
