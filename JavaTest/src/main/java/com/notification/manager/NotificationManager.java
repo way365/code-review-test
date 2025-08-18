@@ -3,6 +3,7 @@ package com.notification.manager;
 import com.notification.service.NotificationService;
 import com.notification.service.impl.DingTalkNotificationService;
 import com.notification.service.impl.FeishuNotificationService;
+import com.notification.service.impl.WeChatNotificationService;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -90,7 +91,18 @@ public class NotificationManager {
         
         String feishuWebhook = System.getProperty("feishu.webhook", "https://open.feishu.cn/open-apis/bot/v2/hook/");
         
+        String wechatAppId = System.getProperty("wechat.appid", "");
+        String wechatAppSecret = System.getProperty("wechat.appsecret", "");
+        String wechatTemplateId = System.getProperty("wechat.templateid", "");
+        String wechatOpenId = System.getProperty("wechat.openid", "");
+        
         services.put("dingtalk", new DingTalkNotificationService(dingTalkWebhook, dingTalkSecret));
         services.put("feishu", new FeishuNotificationService(feishuWebhook));
+        
+        if (!wechatAppId.isEmpty() && !wechatAppSecret.isEmpty() && 
+            !wechatTemplateId.isEmpty() && !wechatOpenId.isEmpty()) {
+            services.put("wechat", new WeChatNotificationService(
+                wechatAppId, wechatAppSecret, wechatTemplateId, wechatOpenId));
+        }
     }
 }
