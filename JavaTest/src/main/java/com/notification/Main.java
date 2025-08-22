@@ -1,9 +1,11 @@
 package com.notification;
 
+import com.notification.excel.example.ExcelImageUploadExample;
 import com.notification.executor.TaskExecutor;
 import com.notification.manager.NotificationManager;
 
 import java.util.Random;
+import java.util.Scanner;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -12,6 +14,35 @@ import java.util.concurrent.TimeUnit;
 public class Main {
     
     public static void main(String[] args) {
+        System.out.println("=== Java任务通知服务演示 ===");
+        System.out.println("请选择功能:");
+        System.out.println("1. 基础通知功能演示");
+        System.out.println("2. Excel图片批量上传演示");
+        System.out.print("请输入选项(1-2): ");
+        
+        Scanner scanner = new Scanner(System.in);
+        String choice = scanner.nextLine().trim();
+        
+        switch (choice) {
+            case "1":
+                runBasicNotificationDemo();
+                break;
+            case "2":
+                runExcelImageUploadDemo();
+                break;
+            default:
+                System.out.println("无效选项，运行基础通知功能演示");
+                runBasicNotificationDemo();
+                break;
+        }
+        
+        scanner.close();
+    }
+    
+    /**
+     * 运行基础通知功能演示
+     */
+    private static void runBasicNotificationDemo() {
         // 初始化通知管理器
         NotificationManager notificationManager = new NotificationManager();
         
@@ -51,6 +82,29 @@ public class Main {
         notificationManager.sendToAll("这是一个自定义测试消息", "测试通知");
         
         System.out.println("所有示例任务执行完成！");
+    }
+    
+    /**
+     * 运行Excel图片批量上传演示
+     */
+    private static void runExcelImageUploadDemo() {
+        System.out.println("\n=== Excel图片批量上传演示 ===");
+        
+        try {
+            ExcelImageUploadExample example = new ExcelImageUploadExample();
+            
+            // 创建示例文件并执行上传
+            String excelFilePath = example.createSampleExcelFile();
+            example.executeUploadExample(excelFilePath);
+            
+            System.out.println("\n可以查看生成的报告文件:");
+            System.out.println("- upload_report_detailed.txt (详细报告)");
+            System.out.println("- upload_report.csv (CSV报告)");
+            
+        } catch (Exception e) {
+            System.err.println("执行Excel图片上传演示失败: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
     
     private static void simulateTask() {
