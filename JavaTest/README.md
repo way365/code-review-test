@@ -2,6 +2,10 @@
 
 这是一个Java任务完成后自动发送通知到钉钉、飞书等平台的工具。
 
+## Redis点赞组件
+
+项目还包含一个高性能的Redis点赞组件，支持防刷、缓存、排行榜等功能。详细信息请查看 [REDIS_LIKE.md](REDIS_LIKE.md)。
+
 ## 功能特性
 
 - ✅ 钉钉机器人通知
@@ -63,8 +67,11 @@ feishu.webhook=https://open.feishu.cn/open-apis/bot/v2/hook/你的webhook_id
 # 编译项目
 mvn clean compile
 
-# 运行示例
+# 运行通知服务示例
 mvn exec:java -Dexec.mainClass="com.notification.Main"
+
+# 运行Redis点赞组件示例
+mvn exec:java -Dexec.mainClass="com.redis.like.RedisLikeExample"
 
 # 打包
 mvn clean package

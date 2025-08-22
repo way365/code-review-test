@@ -56,18 +56,32 @@ public class RedisLikeService {
         private final int maxLikesPerIP;
         private final int timeWindowSeconds;
         private final boolean enableAntiBrush;
+        private final long minLikeIntervalMs; // 最小点赞间隔（毫秒）
+        private final boolean enableWeightedLikes; // 是否启用加权点赞
+        private final boolean enableLikeHistory; // 是否启用点赞历史记录
         
         public LikeConfig(String keyPrefix) {
-            this(keyPrefix, 100, 50, 3600, true);
+            this(keyPrefix, 100, 50, 3600, true, 1000, false, false);
         }
         
         public LikeConfig(String keyPrefix, int maxLikesPerUser, int maxLikesPerIP, 
                          int timeWindowSeconds, boolean enableAntiBrush) {
+            this(keyPrefix, maxLikesPerUser, maxLikesPerIP, timeWindowSeconds, 
+                 enableAntiBrush, 1000, false, false);
+        }
+        
+        public LikeConfig(String keyPrefix, int maxLikesPerUser, int maxLikesPerIP, 
+                         int timeWindowSeconds, boolean enableAntiBrush,
+                         long minLikeIntervalMs, boolean enableWeightedLikes,
+                         boolean enableLikeHistory) {
             this.keyPrefix = keyPrefix;
             this.maxLikesPerUser = maxLikesPerUser;
             this.maxLikesPerIP = maxLikesPerIP;
             this.timeWindowSeconds = timeWindowSeconds;
             this.enableAntiBrush = enableAntiBrush;
+            this.minLikeIntervalMs = minLikeIntervalMs;
+            this.enableWeightedLikes = enableWeightedLikes;
+            this.enableLikeHistory = enableLikeHistory;
         }
         
         // Getters
@@ -76,6 +90,9 @@ public class RedisLikeService {
         public int getMaxLikesPerIP() { return maxLikesPerIP; }
         public int getTimeWindowSeconds() { return timeWindowSeconds; }
         public boolean isEnableAntiBrush() { return enableAntiBrush; }
+        public long getMinLikeIntervalMs() { return minLikeIntervalMs; }
+        public boolean isEnableWeightedLikes() { return enableWeightedLikes; }
+        public boolean isEnableLikeHistory() { return enableLikeHistory; }
     }
     
     /**
@@ -166,9 +183,21 @@ public class RedisLikeService {
             // 执行点赞操作（使用pipeline提高性能）
             Pipeline pipeline = jedis.pipelined();
             pipeline.sadd(likeSetKey, userId);
-            pipeline.incr(likeCountKey);
-            pipeline.zincrby(likeRankKey, 1, targetId);
+            
+            // 根据配置决定是否使用加权点赞
+            double likeWeight = config.isEnableWeightedLikes() ? getLikeWeight(userId, targetId, configKey) : 1.0;
+            pipeline.incrByFloat(likeCountKey, likeWeight);
+            pipeline.zincrby(likeRankKey, likeWeight, targetId);
             pipeline.sadd(userLikeKey, targetId);
+            
+            // 点赞历史记录
+            if (config.isEnableLikeHistory()) {
+                String likeHistoryKey = "like_history:" + userId;
+                String historyValue = targetId + ":" + System.currentTimeMillis();
+                pipeline.lpush(likeHistoryKey, historyValue);
+                pipeline.ltrim(likeHistoryKey, 0, 99); // 只保留最近100条记录
+                pipeline.expire(likeHistoryKey, 86400 * 30); // 30天过期
+            }
             
             // 设置过期时间（防止数据无限增长）
             pipeline.expire(likeSetKey, 86400 * 30); // 30天
@@ -176,7 +205,7 @@ public class RedisLikeService {
             pipeline.expire(userLikeKey, 86400 * 30);
             pipeline.sync();
             
-            long count = jedis.scard(likeSetKey);
+            long count = Math.round(jedis.scard(likeSetKey) * likeWeight);
             successOperations.incrementAndGet();
             return new LikeResult(true, "点赞成功", count);
         } catch (Exception e) {
@@ -194,6 +223,7 @@ public class RedisLikeService {
     }
     
     public LikeResult unlike(String targetId, String userId, String configKey) {
+        totalOperations.incrementAndGet();
         LikeConfig config = configs.getOrDefault(configKey, new LikeConfig(configKey));
         
         try (Jedis jedis = jedisPool.getResource()) {
@@ -208,16 +238,30 @@ public class RedisLikeService {
                 return new LikeResult(false, "未点赞", count);
             }
             
-            // 执行取消点赞操作
-            jedis.multi()
-                .srem(likeSetKey, userId)
-                .decr(likeCountKey)
-                .zincrby(likeRankKey, -1, targetId)
-                .srem(userLikeKey, targetId)
-                .exec();
+            // 获取用户点赞权重
+            double likeWeight = config.isEnableWeightedLikes() ? getLikeWeight(userId, targetId, configKey) : 1.0;
             
-            long count = jedis.scard(likeSetKey);
+            // 使用事务确保操作原子性
+            Transaction transaction = jedis.multi();
+            transaction.srem(likeSetKey, userId);
+            transaction.incrByFloat(likeCountKey, -likeWeight);
+            transaction.zincrby(likeRankKey, -likeWeight, targetId);
+            transaction.srem(userLikeKey, targetId);
+            List<Object> results = transaction.exec();
+            
+            if (results == null) {
+                // 事务执行失败
+                errorOperations.incrementAndGet();
+                return new LikeResult(false, "操作失败，请重试", 0);
+            }
+            
+            long count = Math.round(jedis.scard(likeSetKey) * likeWeight);
+            successOperations.incrementAndGet();
             return new LikeResult(true, "取消点赞成功", count);
+        } catch (Exception e) {
+            errorOperations.incrementAndGet();
+            System.err.println("取消点赞操作失败: " + e.getMessage());
+            return new LikeResult(false, "系统错误，请稍后再试", 0);
         }
     }
     
@@ -234,7 +278,16 @@ public class RedisLikeService {
         try (Jedis jedis = jedisPool.getResource()) {
             String likeCountKey = LIKE_COUNT_KEY + config.getKeyPrefix() + targetId;
             String count = jedis.get(likeCountKey);
-            return count != null ? Long.parseLong(count) : 0;
+            
+            // 如果启用了加权点赞，返回浮点数形式的点赞数
+            if (config.isEnableWeightedLikes()) {
+                return count != null ? Math.round(Double.parseDouble(count)) : 0;
+            } else {
+                return count != null ? Long.parseLong(count) : 0;
+            }
+        } catch (Exception e) {
+            System.err.println("获取点赞数失败: " + e.getMessage());
+            return 0;
         }
     }
     
@@ -396,6 +449,22 @@ public class RedisLikeService {
             return false;
         }
         
+        // 最小点赞间隔检查
+        if (config.getMinLikeIntervalMs() > 0) {
+            String lastLikeTimeKey = "last_like_time:" + userId;
+            String lastLikeTime = jedis.get(lastLikeTimeKey);
+            if (lastLikeTime != null) {
+                long lastTime = Long.parseLong(lastLikeTime);
+                long currentTime = System.currentTimeMillis();
+                if (currentTime - lastTime < config.getMinLikeIntervalMs()) {
+                    return false;
+                }
+            }
+            // 更新最后点赞时间
+            jedis.setex(lastLikeTimeKey, config.getTimeWindowSeconds(), 
+                       String.valueOf(System.currentTimeMillis()));
+        }
+        
         // 增加计数
         jedis.incr(ipLimitKey);
         jedis.expire(ipLimitKey, config.getTimeWindowSeconds());
@@ -434,6 +503,31 @@ public class RedisLikeService {
     /**
      * 获取统计信息
      */
+    /**
+     * 获取用户点赞历史记录
+     */
+    public List<String> getUserLikeHistory(String userId) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            String likeHistoryKey = "like_history:" + userId;
+            List<String> history = jedis.lrange(likeHistoryKey, 0, 99);
+            return history != null ? history : new ArrayList<>();
+        } catch (Exception e) {
+            System.err.println("获取用户点赞历史记录失败: " + e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+    
+    /**
+     * 计算用户点赞权重（示例实现）
+     * 可以根据用户等级、活跃度等因素计算权重
+     */
+    private double getLikeWeight(String userId, String targetId, String configKey) {
+        // 示例：根据用户ID的哈希值计算权重，范围在0.5到2.0之间
+        int hash = userId.hashCode();
+        double weight = 0.5 + (Math.abs(hash) % 151 / 150.0) * 1.5;
+        return Math.round(weight * 100.0) / 100.0; // 保留两位小数
+    }
+    
     public Map<String, Object> getStats(String configKey) {
         LikeConfig config = configs.getOrDefault(configKey, new LikeConfig(configKey));
         

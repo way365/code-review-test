@@ -226,10 +226,10 @@ public class RedisLikeExample {
         
         RedisLikeManager likeManager = new RedisLikeManager("localhost", 6379);
         
-        // 1. 文章点赞系统
+        // 1. 文章点赞系统（启用最小点赞间隔、加权点赞和历史记录）
         String articleConfig = "articles";
         RedisLikeService.LikeConfig articleConfigObj = new RedisLikeService.LikeConfig(
-            "articles", 100, 50, 3600, true
+            "articles", 100, 50, 3600, true, 5000, true, true
         );
         likeManager.registerConfig(articleConfig, articleConfigObj);
         
@@ -243,21 +243,44 @@ public class RedisLikeExample {
         // 模拟业务操作
         String articleId = "article_20240101";
         String commentId = "comment_001";
+        String userId = "user_A";
         
-        // 文章点赞
-        likeManager.like(articleId, "user_A", "192.168.1.100", articleConfig);
-        likeManager.like(articleId, "user_B", "192.168.1.101", articleConfig);
+        // 文章点赞（测试最小点赞间隔）
+        System.out.println("\n--- 测试最小点赞间隔 ---");
+        RedisLikeService.LikeResult result1 = likeManager.like(articleId, userId, "192.168.1.100", articleConfig);
+        System.out.println("第一次点赞: " + result1.getMessage());
+        
+        // 立即再次点赞，应该被拒绝
+        RedisLikeService.LikeResult result2 = likeManager.like(articleId, userId, "192.168.1.100", articleConfig);
+        System.out.println("立即再次点赞: " + result2.getMessage());
+        
+        // 等待超过最小间隔时间后再次点赞
+        try {
+            Thread.sleep(6000); // 等待6秒
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        RedisLikeService.LikeResult result3 = likeManager.like(articleId + "_2", userId, "192.168.1.100", articleConfig);
+        System.out.println("等待后再次点赞: " + result3.getMessage());
         
         // 评论点赞
         likeManager.like(commentId, "user_C", "192.168.1.102", commentConfig);
         
         // 获取统计
+        System.out.println("\n--- 点赞统计 ---");
         System.out.println("文章点赞数: " + likeManager.getLikeCount(articleId, articleConfig));
         System.out.println("评论点赞数: " + likeManager.getLikeCount(commentId, commentConfig));
         
+        // 获取用户点赞历史记录
+        System.out.println("\n--- 用户点赞历史记录 ---");
+        List<String> history = likeManager.getUserLikeHistory(userId);
+        for (String record : history) {
+            System.out.println("  " + record);
+        }
+        
         // 文章排行榜
         List<Map.Entry<String, Long>> articleRankings = likeManager.likeService.getRankings(10, articleConfig);
-        System.out.println("热门文章: " + articleRankings);
+        System.out.println("\n热门文章: " + articleRankings);
         
         likeManager.close();
     }

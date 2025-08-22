@@ -35,6 +35,9 @@ public class RedisLikeManager {
         this.likeService = new EventDrivenLikeService(jedisPool);
         this.cacheService = new LikeCacheService(jedisPool, 300, 10000); // 5分钟缓存，1万条上限
         this.configs = new ConcurrentHashMap<>();
+        
+        // 注册默认配置
+        registerConfig("default", new RedisLikeService.LikeConfig("default"));
     }
     
     /**
@@ -42,6 +45,41 @@ public class RedisLikeManager {
      */
     public RedisLikeManager(String redisHost, int redisPort) {
         this(redisHost, redisPort, null);
+    }
+    
+    /**
+     * 构造函数，支持自定义Jedis连接池配置
+     */
+    public RedisLikeManager(String redisHost, int redisPort, JedisPoolConfig poolConfig) {
+        this(redisHost, redisPort, null, poolConfig);
+    }
+    
+    /**
+     * 构造函数，支持配置参数
+     */
+    public RedisLikeManager(String redisHost, int redisPort, String redisPassword, JedisPoolConfig poolConfig) {
+        if (poolConfig == null) {
+            poolConfig = new JedisPoolConfig();
+            poolConfig.setMaxTotal(100);
+            poolConfig.setMaxIdle(50);
+            poolConfig.setMinIdle(10);
+            poolConfig.setTestOnBorrow(true);
+            poolConfig.setTestOnReturn(true);
+            poolConfig.setTestWhileIdle(true);
+        }
+        
+        if (redisPassword != null && !redisPassword.isEmpty()) {
+            this.jedisPool = new JedisPool(poolConfig, redisHost, redisPort, 2000, redisPassword);
+        } else {
+            this.jedisPool = new JedisPool(poolConfig, redisHost, redisPort, 2000);
+        }
+        
+        this.likeService = new EventDrivenLikeService(jedisPool);
+        this.cacheService = new LikeCacheService(jedisPool, 300, 10000); // 5分钟缓存，1万条上限
+        this.configs = new ConcurrentHashMap<>();
+        
+        // 注册默认配置
+        registerConfig("default", new RedisLikeService.LikeConfig("default"));
     }
     
     /**
@@ -108,6 +146,13 @@ public class RedisLikeManager {
      */
     public Map<String, Object> getStats(String configKey) {
         return likeService.getStats(configKey);
+    }
+    
+    /**
+     * 获取用户点赞历史记录
+     */
+    public List<String> getUserLikeHistory(String userId) {
+        return likeService.getUserLikeHistory(userId);
     }
     
     /**
