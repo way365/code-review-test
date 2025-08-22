@@ -4,13 +4,12 @@ import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.Tuple;
 import redis.clients.jedis.params.ZRangeParams;
+import redis.clients.jedis.Transaction;
+import redis.clients.jedis.Pipeline;
 
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 /**
@@ -21,7 +20,11 @@ public class RedisLikeService {
     
     private final JedisPool jedisPool;
     private final ScheduledExecutorService scheduler;
+    private final ExecutorService asyncExecutor;
     private final Map<String, LikeConfig> configs;
+    private final AtomicLong totalOperations;
+    private final AtomicLong successOperations;
+    private final AtomicLong errorOperations;
     
     // Redis键前缀
     private static final String LIKE_SET_KEY = "likes:";
@@ -34,7 +37,11 @@ public class RedisLikeService {
     public RedisLikeService(JedisPool jedisPool) {
         this.jedisPool = jedisPool;
         this.scheduler = Executors.newScheduledThreadPool(2);
+        this.asyncExecutor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() * 2);
         this.configs = new ConcurrentHashMap<>();
+        this.totalOperations = new AtomicLong(0);
+        this.successOperations = new AtomicLong(0);
+        this.errorOperations = new AtomicLong(0);
         
         // 启动定时清理任务
         startCleanupTask();
@@ -123,12 +130,25 @@ public class RedisLikeService {
         return like(targetId, userId, ip, "default");
     }
     
+    /**
+     * 异步点赞
+     */
+    public CompletableFuture<LikeResult> likeAsync(String targetId, String userId, String ip) {
+        return likeAsync(targetId, userId, ip, "default");
+    }
+    
+    public CompletableFuture<LikeResult> likeAsync(String targetId, String userId, String ip, String configKey) {
+        return CompletableFuture.supplyAsync(() -> like(targetId, userId, ip, configKey), asyncExecutor);
+    }
+    
     public LikeResult like(String targetId, String userId, String ip, String configKey) {
+        totalOperations.incrementAndGet();
         LikeConfig config = configs.getOrDefault(configKey, new LikeConfig(configKey));
         
         try (Jedis jedis = jedisPool.getResource()) {
             // 防刷检查
             if (config.isEnableAntiBrush() && !checkAntiBrush(jedis, userId, ip, config)) {
+                errorOperations.incrementAndGet();
                 return new LikeResult(false, "操作过于频繁，请稍后再试", 0);
             }
             
@@ -143,21 +163,26 @@ public class RedisLikeService {
                 return new LikeResult(false, "已点赞", count);
             }
             
-            // 执行点赞操作
-            jedis.multi()
-                .sadd(likeSetKey, userId)
-                .incr(likeCountKey)
-                .zincrby(likeRankKey, 1, targetId)
-                .sadd(userLikeKey, targetId)
-                .exec();
+            // 执行点赞操作（使用pipeline提高性能）
+            Pipeline pipeline = jedis.pipelined();
+            pipeline.sadd(likeSetKey, userId);
+            pipeline.incr(likeCountKey);
+            pipeline.zincrby(likeRankKey, 1, targetId);
+            pipeline.sadd(userLikeKey, targetId);
             
             // 设置过期时间（防止数据无限增长）
-            jedis.expire(likeSetKey, 86400 * 30); // 30天
-            jedis.expire(likeCountKey, 86400 * 30);
-            jedis.expire(userLikeKey, 86400 * 30);
+            pipeline.expire(likeSetKey, 86400 * 30); // 30天
+            pipeline.expire(likeCountKey, 86400 * 30);
+            pipeline.expire(userLikeKey, 86400 * 30);
+            pipeline.sync();
             
             long count = jedis.scard(likeSetKey);
+            successOperations.incrementAndGet();
             return new LikeResult(true, "点赞成功", count);
+        } catch (Exception e) {
+            errorOperations.incrementAndGet();
+            System.err.println("点赞操作失败: " + e.getMessage());
+            return new LikeResult(false, "系统错误，请稍后再试", 0);
         }
     }
     
@@ -279,10 +304,53 @@ public class RedisLikeService {
         
         try (Jedis jedis = jedisPool.getResource()) {
             Map<String, Boolean> results = new HashMap<>();
+            Pipeline pipeline = jedis.pipelined();
+            Map<String, redis.clients.jedis.Response<Boolean>> responses = new HashMap<>();
             
+            // 批量查询
             for (String targetId : targetIds) {
                 String likeSetKey = LIKE_SET_KEY + config.getKeyPrefix() + targetId;
-                results.put(targetId, jedis.sismember(likeSetKey, userId));
+                responses.put(targetId, pipeline.sismember(likeSetKey, userId));
+            }
+            
+            pipeline.sync();
+            
+            // 收集结果
+            for (String targetId : targetIds) {
+                results.put(targetId, responses.get(targetId).get());
+            }
+            
+            return results;
+        }
+    }
+    
+    /**
+     * 批量获取点赞数
+     */
+    public Map<String, Long> batchGetLikeCounts(Set<String> targetIds) {
+        return batchGetLikeCounts(targetIds, "default");
+    }
+    
+    public Map<String, Long> batchGetLikeCounts(Set<String> targetIds, String configKey) {
+        LikeConfig config = configs.getOrDefault(configKey, new LikeConfig(configKey));
+        
+        try (Jedis jedis = jedisPool.getResource()) {
+            Map<String, Long> results = new HashMap<>();
+            Pipeline pipeline = jedis.pipelined();
+            Map<String, redis.clients.jedis.Response<String>> responses = new HashMap<>();
+            
+            // 批量查询
+            for (String targetId : targetIds) {
+                String likeCountKey = LIKE_COUNT_KEY + config.getKeyPrefix() + targetId;
+                responses.put(targetId, pipeline.get(likeCountKey));
+            }
+            
+            pipeline.sync();
+            
+            // 收集结果
+            for (String targetId : targetIds) {
+                String count = responses.get(targetId).get();
+                results.put(targetId, count != null ? Long.parseLong(count) : 0);
             }
             
             return results;
@@ -387,6 +455,13 @@ public class RedisLikeService {
             List<Map.Entry<String, Long>> topContent = getRankings(10, configKey);
             stats.put("topContent", topContent);
             
+            // 添加性能统计
+            stats.put("totalOperations", totalOperations.get());
+            stats.put("successOperations", successOperations.get());
+            stats.put("errorOperations", errorOperations.get());
+            stats.put("successRate", totalOperations.get() > 0 ? 
+                (double) successOperations.get() / totalOperations.get() : 0.0);
+            
             return stats;
         }
     }
@@ -395,8 +470,23 @@ public class RedisLikeService {
      * 关闭服务
      */
     public void close() {
-        if (scheduler != null && !scheduler.isShutdown()) {
-            scheduler.shutdown();
+        try {
+            if (scheduler != null && !scheduler.isShutdown()) {
+                scheduler.shutdown();
+                if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                    scheduler.shutdownNow();
+                }
+            }
+            
+            if (asyncExecutor != null && !asyncExecutor.isShutdown()) {
+                asyncExecutor.shutdown();
+                if (!asyncExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    asyncExecutor.shutdownNow();
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            System.err.println("关闭服务被中断: " + e.getMessage());
         }
     }
 }
